@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import os
 from dipy.io.image import load_nifti
 
-
+####This code works for simulated data
 torch.backends.cudnn.enabled = True  
 torch.backends.cudnn.benchmark = True 
 dtype = torch.cuda.FloatTensor
@@ -19,81 +19,78 @@ imsize =-1
 PLOT = True
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
-show_every = 40
+show_every = 40   #Save checkpoints every 40 iterations
 
-
-# load data
+# load data 
+#-------------------------------------------------------------------------------------------------------------------------------------
 mask,_ = load_nifti('/home/chenyunwei/DIP_data/2015_simulated_data/mask_.nii.gz')
-mask_np = mask.astype(np.float32)
-# 裁剪图片，减小计算
-img_np_mask = mask_np
-# 检查shape
-print(img_np_mask.shape)
 # load noise free image
 img_np,_ = load_nifti('/home/chenyunwei/DIP_data/2015_simulated_data/dwi_nf.nii.gz')
+mask_np = mask.astype(np.float32)
+# Crop pictures to reduce calculations
+img_np_mask = mask_np
+# check shape
+print(img_np_mask.shape)
 img_np = img_np.astype(np.float32)
-# 噪声水平 可改
-noise_level = 3
-
-# 裁剪图片，减小计算
-
-# 检查shape 
 print(img_np.shape)
-# 转置数据，符合网络输入
+
 img_np = img_np.transpose(3,0,1,2)
 
-
-# 加载噪声数据
+#---------------------------------------------------------------------------
+# noise_level sigma !!!!!
+noise_level = 3
+# -------------------------Load noise data--------------------------------------------------------------------------
 img_noisy_np,_ = load_nifti('/home/chenyunwei/DIP_data/2015_simulated_data/dwi_level_' + str(noise_level) +'.nii.gz')
 img_noisy_np = img_noisy_np.astype(np.float32)
 img_noisy_np = img_noisy_np.transpose(3,0,1,2)
 print(img_noisy_np.shape)
 sigma_ = noise_level  /100
 
-# mask 后的噪声数据
+# Noisy data after masking
 img_noisy_np_nonskull = img_noisy_np * img_np_mask
 print(img_noisy_np_nonskull.shape)
-# mask 后的无噪数据
+# Noise-free data after masking
 img_np_nonskull = img_np * img_np_mask
 
-
-#设置网络
+#Set up network
 INPUT = 'noise' 
 OPT_OVER = 'net'
-#填充方式 反射
+#fill reflection
 pad = 'reflection'
 i = 0
 
 
-# 学习率
+# Initial learning rate
 LR = 0.01
+LR_DECAY = 0.9
+LR_DECAY_INTERVAL = 2000
 
-# 优化算法
+# Optimization algorithm
 OPTIMIZER='adam'
-#最大迭代次数
-num_iter = 200000
-#输入通道数 
+#Maximum number of iterations
+num_iter = 50000
+#Number of input channels 
 input_depth = 16
-# 网络参数初始化
-net = get_net(input_depth, 'skip', pad,skip_n33d=32,skip_n33u=32,skip_n11=4,num_scales=4,upsample_mode='trilinear',n_channels=16).type(dtype)
+# Network parameter initialization
+net = get_net(input_depth, 'skip', pad,skip_n33d=32,skip_n33u=32,skip_n11=4,num_scales=4,upsample_mode='trilinear',n_channels=input_depth).type(dtype)
+#skip_n33d,skip_n33u，theses are the number of characteristic channels of each layer of the network, which can be increased appropriately according to the volume size of the data.
 
 
-
-
-# 网络输入 5D 随机张量 并裁剪加速计算
+#-------------------------------------------------------------------------------------------------------------------------
+# The network inputs 5D random tensors and clips them to accelerate calculations
 net_input,_ = load_nifti('/home/chenyunwei/DIP_data/2015_simulated_data/noisy_input.nii.gz')
 net_input = net_input.transpose(3,0,1,2)
 net_input = np.expand_dims(net_input,axis=0)
 net_input = net_input.astype(np.float32)
 net_input = torch.from_numpy(net_input).cuda() 
-# 检查数据是否位于GPU，shape
+# Check if data is located on GPU, shape
 print(net_input.device)
 print(type(net_input))
 print(net_input.shape)
-# loss 均方误差 mse
+# loss mse
 mse = torch.nn.MSELoss().type(dtype)
-# 将有噪数据和无噪数据转换为torch tensor
-img_noisy_torch = np_to_torch(img_noisy_np).type(dtype) # 把数组转换成张量，且二者共享内存 img_noisy_np内存储的是加噪后的图像 
+#Convert noisy and non-noisy data to torchensor
+img_noisy_torch = np_to_torch(img_noisy_np).type(dtype) # 
 
 # normal
 psrn_noisy_list = []  
@@ -101,7 +98,7 @@ psrn_out_list = []
 rmse_out_list = []
 total_loss_list = [] 
 
-# # 断点重新训练
+# # Breakpoint retraining
 # bp = True
 # ii = np.load('/home/chenyunwei/MDIP_M2_W_3D/generate data/iterations/level_3/i.npy')
 # i = np.load('/home/chenyunwei/MDIP_M2_W_3D/generate data/iterations/level_3/i.npy')
@@ -142,7 +139,11 @@ mask_num_sqrt = torch.sqrt(mask_num)
 last_i=0
 def closure():   #######！！！！！#####
     
-    global total_loss_last,num_iter,t,psrn_gt_last,LR,i, out_avg, psrn_noisy_last, last_net, net_input, psrn_noisy_list, psrn_gt_list,total_loss_list   #去噪结果PSNR  
+    global total_loss_last,num_iter,t,psrn_gt_last,LR,i, out_avg, psrn_noisy_last, last_net, net_input, psrn_noisy_list, psrn_gt_list,total_loss_list   #denoise result PSNR  
+    # Keep the original schedule: LR=0.01 and decay by 0.9 every 2000 iterations.
+    LR = 0.01 * LR_DECAY ** (i // LR_DECAY_INTERVAL)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = LR
     out = net(net_input)    # <class 'torch.Tensor'>         
     out_inside_last = out.data
     M2_weight = torch.sqrt(out_inside_last**2 + sigma_**2)*2*sigma_
@@ -150,7 +151,7 @@ def closure():   #######！！！！！#####
     total_loss.backward() 
     total_loss_ = total_loss.data.cpu().numpy()
     total_loss_ = float(total_loss_)
-    out_np = out.detach().cpu().numpy()[0]  #转化为np数组
+    out_np = out.detach().cpu().numpy()[0]  #Convert to np array
     out_np_nonskull = out_np * img_np_mask
     # out_np_nonskull_gt = out_np_nonskull
     
@@ -173,7 +174,7 @@ def closure():   #######！！！！！#####
     np.save(loss_name, np.array(total_loss_list))
     iteration_name = '/home/chenyunwei/MDIP_M2_W_3D/generate data/iterations/level_3/i.npy'  
     np.save(iteration_name, i)
-    #保存每一次计算的PSNR
+    #Save the PSNR calculated for each time
 
     # if (i+1)%show_every == 0:
     #     model_name_last = '/home/chenyunwei/MDIP_M2_W_3D/generate data/trained_model/level_3/epoch_' + str(i) +'.pt'
@@ -190,14 +191,14 @@ def closure():   #######！！！！！#####
             fig_name = '/home/chenyunwei/MDIP_M2_W_3D/generate data/result/level_3/epoch_' + str(i) +'.png'
             plt.figure(figsize=(8,1))
             plt.subplots_adjust(wspace=0, hspace=0, top=1, bottom=0, left=0, right=1), plt.axis('off')
-            plt.subplot(1,8,1), plt.imshow(img_np_nonskull[9, :, :, 43],vmin=0,vmax=0.3, cmap='gray'), plt.axis('off')
-            plt.subplot(1,8,2), plt.imshow(img_np_nonskull[62, :, :, 43],vmin=0,vmax=0.2, cmap='gray'), plt.axis('off')
-            plt.subplot(1,8,3), plt.imshow(img_noisy_np_nonskull[9, :, :, 43],vmin=0,vmax=0.3, cmap='gray'), plt.axis('off') 
-            plt.subplot(1,8,4), plt.imshow(img_noisy_np_nonskull[62, :, :, 43],vmin=0,vmax=0.2, cmap='gray'), plt.axis('off')
+            plt.subplot(1,8,1), plt.imshow(img_np_nonskull[9, :, :, X],vmin=0,vmax=0.3, cmap='gray'), plt.axis('off')
+            plt.subplot(1,8,2), plt.imshow(img_np_nonskull[62, :, :, X],vmin=0,vmax=0.2, cmap='gray'), plt.axis('off')
+            plt.subplot(1,8,3), plt.imshow(img_noisy_np_nonskull[9, :, :, X],vmin=0,vmax=0.3, cmap='gray'), plt.axis('off') 
+            plt.subplot(1,8,4), plt.imshow(img_noisy_np_nonskull[62, :, :, X],vmin=0,vmax=0.2, cmap='gray'), plt.axis('off')
             plt.subplot(1,8,5), plt.imshow(out_np_X,vmin=0,vmax=0.3,cmap='gray'), plt.axis('off')
             plt.subplot(1,8,6), plt.imshow(out_np_Y,vmin=0,vmax=0.2,cmap='gray') , plt.axis('off') 
-            plt.subplot(1,8,7), plt.imshow((abs(img_np_nonskull[9, :, :, 43] - out_np_X)),vmin=0,vmax=0.075,cmap='gray') , plt.axis('off')
-            plt.subplot(1,8,8), plt.imshow((abs(img_np_nonskull[62, :, :, 43] - out_np_Y)),vmin=0,vmax=0.05,cmap='gray') , plt.axis('off')
+            plt.subplot(1,8,7), plt.imshow((abs(img_np_nonskull[9, :, :, X] - out_np_X)),vmin=0,vmax=0.075,cmap='gray') , plt.axis('off')
+            plt.subplot(1,8,8), plt.imshow((abs(img_np_nonskull[62, :, :, X] - out_np_Y)),vmin=0,vmax=0.05,cmap='gray') , plt.axis('off')
             plt.savefig(fig_name)
         loss_name = '/home/chenyunwei/MDIP_M2_W_3D/nordic/1p5/loss_' + str(i%(show_every*2)) +'.pt'
         model_name = '/home/chenyunwei/MDIP_M2_W_3D/nordic/1p5/trained_model/epoch_' + str(i) +'.pt'
@@ -230,7 +231,6 @@ def closure():   #######！！！！！#####
         # if t > 0:
         #     LR = LR / 100
         #     t = t-1
-    LR=0.01*0.9**(i//2000)
     i += 1      
     return total_loss_list,psrn_out_list,rmse_out_list
 
