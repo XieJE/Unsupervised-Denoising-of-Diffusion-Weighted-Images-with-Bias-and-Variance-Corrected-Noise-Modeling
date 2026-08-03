@@ -14,6 +14,10 @@ simulated_data.zip
 
 ├── dwi_level_5.nii.gz  # noise level(sigma)=0.05 
 
+├── dwi_level_3_5.nii.gz  #  non-uniform noise distributions 
+
+├── noise_map_level_3_5.nii.gz  # 
+
 ├── noisy_input.nii.gz
 
 └── mask.nii.gz
