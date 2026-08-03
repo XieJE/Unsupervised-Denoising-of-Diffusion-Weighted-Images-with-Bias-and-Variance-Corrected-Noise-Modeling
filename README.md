@@ -9,7 +9,11 @@ The simulated data used in the experiments are available in the
 [GitHub Release](https://github.com/XieJine/Rician-DIP-dMRI-Denoising/releases/latest).
 
 simulated_data.zip
+
 ├── dwi_reference.nii.gz
+
 ├── dwi_level_5.nii.gz  # noise level(sigma)=0.05 
+
 ├── noisy_input.nii.gz
+
 └── mask.nii.gz
